@@ -2,7 +2,7 @@ use avian2d::prelude::{Collider, PhysicsDebugPlugin, PhysicsPickingPlugin, Rigid
 use avian2d::PhysicsPlugins;
 use bevy::app::{App, PluginGroup, Startup};
 use bevy::asset::AssetServer;
-use bevy::prelude::{AppExtStates, Camera2d, Commands, Component, Entity, Handle, Image, ImagePlugin, IntoScheduleConfigs, Mut, NextState, Pointer, PostUpdate, Pressed, Query, Released, Res, ResMut, Resource, Sprite, State, States, Transform, Trigger, Vec3, With};
+use bevy::prelude::{AppExtStates, Camera2d, Commands, Component, ContainsEntity, Entity, FixedUpdate, Handle, Image, ImagePlugin, IntoScheduleConfigs, Mut, NextState, Pointer, Pressed, Query, Res, ResMut, Resource, Sprite, State, States, Transform, Trigger, Vec3, With};
 use bevy::utils::default;
 use bevy::DefaultPlugins;
 
@@ -15,7 +15,7 @@ fn main() {
             PhysicsPickingPlugin,
         ))
         .add_systems(Startup, (load_resources, startup.after(load_resources)))
-        .add_systems(PostUpdate, handle_cell_pressed_system)
+        .add_systems(FixedUpdate, system_additional_wins_check_system)
         .init_state::<GameState>()
         .run();
 }
@@ -25,23 +25,6 @@ struct GameAssets {
     empty_texture: Handle<Image>,
     x_texture: Handle<Image>,
     zero_texture: Handle<Image>,
-}
-
-#[derive(Component)]
-pub struct PressedCell {
-    is_handled: bool
-}
-
-impl PressedCell {
-    pub fn default() -> Self {
-        Self {
-            is_handled: false
-        }
-    }
-
-    pub fn handle(&mut self) {
-        self.is_handled = true;
-    }
 }
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -153,58 +136,87 @@ fn startup(
                     scale: scale,
                     ..default()
                 },
-            )).observe(|t: Trigger<Pointer<Pressed>>, mut commands: Commands| {
-                commands.entity(t.event().target).insert(PressedCell::default());
-            }).observe(|t: Trigger<Pointer<Released>>, mut commands: Commands| {
-                commands.entity(t.event().target).remove::<PressedCell>();
+            )).observe(|trigger: Trigger<Pointer<Pressed>>,
+                        mut commands: Commands,
+                        state: Res<State<GameState>>,
+                        game_assets: Res<GameAssets>,
+                        mut next_state: ResMut<NextState<GameState>>,
+                        mut cell_q: Query<(&mut PlayableCell)>,
+                        mut game_field_q: Query<&mut GameField>,| {
+                let target_entity = trigger.target.entity();
+                handle_cell_pressed_system(
+                    target_entity,
+                    cell_q,
+                    state,
+                    next_state,
+                    game_field_q,
+                    commands,
+                    game_assets,
+                );
             });
         }
     }
 }
 
 fn handle_cell_pressed_system(
-    mut cell_q: Query<(Entity, &mut PlayableCell, &mut PressedCell), With<PressedCell>>,
+    target_entity: Entity,
+    mut cell_q: Query<(&mut PlayableCell)>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut game_field_q: Query<&mut GameField>,
     mut commands: Commands,
     game_assets: Res<GameAssets>,
 ) {
-    if let Ok((entity, mut playable_cell, mut pressed_cell)) = cell_q.single_mut() {
+    if let Ok((mut playable_cell)) = cell_q.get_mut(target_entity) {
         if let Ok(mut game_field) = game_field_q.single_mut() {
             match *state.get() {
                 GameState::XTurn => {
-                    if !pressed_cell.is_handled {
-                        pressed_cell.handle();
-                        playable_cell.state = PlayableCellState::X;
-                        game_field.put_on_field(
-                            playable_cell.x_index as usize,
-                            playable_cell.y_index as usize,
-                            PlayableCellState::X
-                        );
-                        commands.entity(entity).insert(Sprite::from_image(game_assets.x_texture.clone()));
-                        next_state.set(resolve_next_game_state(GameState::XTurn, game_field));
-                    }
+                    playable_cell.state = PlayableCellState::X;
+                    game_field.put_on_field(
+                        playable_cell.x_index as usize,
+                        playable_cell.y_index as usize,
+                        PlayableCellState::X
+                    );
+                    commands.entity(target_entity).insert(Sprite::from_image(game_assets.x_texture.clone()));
+                    next_state.set(resolve_next_game_state(GameState::XTurn, game_field));
                 }
                 GameState::ZeroTurn => {
-                    if !pressed_cell.is_handled {
-                        pressed_cell.handle();
-                        playable_cell.state = PlayableCellState::Zero;
-                        game_field.put_on_field(
-                            playable_cell.x_index as usize,
-                            playable_cell.y_index as usize,
-                            PlayableCellState::Zero
-                        );
-                        commands.entity(entity).insert(Sprite::from_image(game_assets.zero_texture.clone()));
-                        next_state.set(resolve_next_game_state(GameState::ZeroTurn, game_field));
-                    }
+                    playable_cell.state = PlayableCellState::Zero;
+                    game_field.put_on_field(
+                        playable_cell.x_index as usize,
+                        playable_cell.y_index as usize,
+                        PlayableCellState::Zero
+                    );
+                    commands.entity(target_entity).insert(Sprite::from_image(game_assets.zero_texture.clone()));
+                    next_state.set(resolve_next_game_state(GameState::ZeroTurn, game_field));
                 }
                 GameState::XWins => {
-                    println!("X wins");
                 }
                 GameState::ZeroWins => {
-                    println!("0 wins");
                 }
+            }
+        }
+    }
+}
+
+fn system_additional_wins_check_system(
+    state: Res<State<GameState>>,
+    mut game_field_q: Query<Entity, With<GameField>>,
+    mut commands: Commands,
+) {
+    if let Ok(entity) = game_field_q.single_mut() {
+        match *state.get() {
+            GameState::XTurn => {
+            }
+            GameState::ZeroTurn => {
+            }
+            GameState::XWins => {
+                println!("X wins!");
+                commands.entity(entity).despawn();
+            }
+            GameState::ZeroWins => {
+                println!("0 wins!");
+                commands.entity(entity).despawn();
             }
         }
     }
