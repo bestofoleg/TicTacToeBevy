@@ -37,6 +37,7 @@ pub enum GameState {
     ZeroTurn,
     XWins,
     ZeroWins,
+    Draw,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,6 +93,18 @@ fn ui_example_system(mut contexts: EguiContexts,
                      mut app_exit_events: EventWriter<AppExit>) {
     if let Ok(ctx) = contexts.ctx_mut() {
         match *state.get() {
+            GameState::Draw => {
+                if let Ok(entity) = game_field_q.single_mut() {
+                    commands.entity(entity).despawn();
+                }
+                egui::Window::new("Game summary")
+                    .show(ctx, |ui| {
+                        ui.add(egui::Label::new("Draw!"));
+                        if ui.add(egui::Button::new("Done!")).clicked() {
+                            next_state.set(GameState::BeforeGame);
+                        }
+                    });
+            }
             GameState::BeforeGame => {
                 egui::Window::new("Main menu")
                     .show(ctx, |ui| {
@@ -254,6 +267,8 @@ fn handle_cell_pressed_system(
     if let Ok((mut playable_cell)) = cell_q.get_mut(target_entity) {
         if let Ok(mut game_field) = game_field_q.single_mut() {
             match *state.get() {
+                GameState::Draw => {
+                }
                 GameState::BeforeGame => {}
                 GameState::XTurn => {
                     playable_cell.state = PlayableCellState::X;
@@ -288,7 +303,7 @@ fn resolve_next_game_state(
     current_state: GameState,
     game_field: Mut<GameField>,
 ) -> GameState {
-    match check_winner(game_field) {
+    match check_winner(&game_field) {
         None => {
             if current_state == GameState::XTurn {
                 GameState::ZeroTurn
@@ -305,7 +320,7 @@ fn resolve_next_game_state(
                     GameState::ZeroWins
                 }
                 PlayableCellState::Empty => {
-                    panic!("Wrong state!")
+                    GameState::Draw
                 }
             }
         }
@@ -326,7 +341,24 @@ const WIN_PATTERNS: [[(usize, usize); 3]; 8] = [
     [(0,2), (1,1), (2,0)],
 ];
 
-fn check_winner(game_field: Mut<GameField>) -> Option<PlayableCellState> {
+// fn check_winner(game_field: Mut<GameField>) -> Option<PlayableCellState> {
+//     for &[a, b, c] in &WIN_PATTERNS {
+//         let (ax, ay) = a;
+//         let (bx, by) = b;
+//         let (cx, cy) = c;
+//
+//         if game_field.field[ax][ay] != PlayableCellState::Empty
+//             && game_field.field[ax][ay] == game_field.field[bx][by]
+//             && game_field.field[bx][by] == game_field.field[cx][cy] {
+//             return Some(game_field.field[ax][ay]);
+//         }
+//     }
+//
+//     None
+// }
+
+fn check_winner(game_field: &GameField) -> Option<PlayableCellState> {
+    // Проверка победы
     for &[a, b, c] in &WIN_PATTERNS {
         let (ax, ay) = a;
         let (bx, by) = b;
@@ -334,12 +366,30 @@ fn check_winner(game_field: Mut<GameField>) -> Option<PlayableCellState> {
 
         if game_field.field[ax][ay] != PlayableCellState::Empty
             && game_field.field[ax][ay] == game_field.field[bx][by]
-            && game_field.field[bx][by] == game_field.field[cx][cy] {
+            && game_field.field[bx][by] == game_field.field[cx][cy]
+        {
             return Some(game_field.field[ax][ay]);
         }
     }
 
+    // Проверка ничьи (все клетки заполнены и нет победителя)
+    if is_draw(game_field) {
+        return Some(PlayableCellState::Empty); // или специальное значение для ничьи
+    }
+
     None
+}
+
+fn is_draw(game_field: &GameField) -> bool {
+    // Проверяем, что все клетки заполнены (нет пустых)
+    for row in &game_field.field {
+        for cell in row {
+            if *cell == PlayableCellState::Empty {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 
