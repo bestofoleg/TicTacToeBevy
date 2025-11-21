@@ -1,10 +1,11 @@
 use avian2d::prelude::{Collider, PhysicsDebugPlugin, PhysicsPickingPlugin, RigidBody};
 use avian2d::PhysicsPlugins;
-use bevy::app::{App, PluginGroup, Startup};
+use bevy::app::{App, FixedUpdate, PluginGroup, Startup};
 use bevy::asset::AssetServer;
-use bevy::prelude::{AppExtStates, Camera2d, Commands, Component, ContainsEntity, Entity, FixedUpdate, Handle, Image, ImagePlugin, IntoScheduleConfigs, Mut, NextState, Pointer, Pressed, Query, Res, ResMut, Resource, Sprite, State, States, Transform, Trigger, Vec3, With};
+use bevy::prelude::{Added, AppExit, AppExtStates, Camera2d, Commands, Component, ContainsEntity, Entity, EventWriter, Handle, Image, ImagePlugin, IntoScheduleConfigs, Mut, NextState, Pointer, Pressed, Query, Res, ResMut, Resource, Sprite, State, States, Transform, Trigger, Vec3, With};
 use bevy::utils::default;
 use bevy::DefaultPlugins;
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
 fn main() {
     App::new()
@@ -13,23 +14,26 @@ fn main() {
             PhysicsPlugins::default().with_length_unit(100.0),
             PhysicsDebugPlugin::default(),
             PhysicsPickingPlugin,
+            EguiPlugin::default(),
         ))
         .add_systems(Startup, (load_resources, startup.after(load_resources)))
-        .add_systems(FixedUpdate, system_additional_wins_check_system)
+        .add_systems(EguiPrimaryContextPass, ui_example_system)
+        .add_systems(FixedUpdate, on_game_field_created)
         .init_state::<GameState>()
         .run();
 }
 
 #[derive(Resource, Clone)]
-struct GameAssets {
+pub struct GameAssets {
     empty_texture: Handle<Image>,
     x_texture: Handle<Image>,
     zero_texture: Handle<Image>,
 }
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-enum GameState {
+pub enum GameState {
     #[default]
+    BeforeGame,
     XTurn,
     ZeroTurn,
     XWins,
@@ -79,6 +83,89 @@ impl GameField {
     }
 }
 
+fn ui_example_system(mut contexts: EguiContexts,
+                     state: Res<State<GameState>>,
+                     mut next_state: ResMut<NextState<GameState>>,
+                     game_assets: Res<GameAssets>,
+                     mut commands: Commands,
+                     mut game_field_q: Query<Entity, With<GameField>>,
+                     playable_cell: Query<(Entity, &mut PlayableCell), With<PlayableCell>>,
+                     mut app_exit_events: EventWriter<AppExit>) {
+    if let Ok(ctx) = contexts.ctx_mut() {
+        match *state.get() {
+            GameState::BeforeGame => {
+                egui::Window::new("Main menu")
+                    .show(ctx, |ui| {
+                        if ui.add(egui::Button::new("New Game")).clicked() {
+                            reinit_playable_cells(
+                                playable_cell,
+                                commands,
+                                game_assets,
+                            );
+                        }
+                        if ui.add(egui::Button::new("Quit")).clicked() {
+                            app_exit_events.write(AppExit::Success);
+                        }
+                    });
+            }
+            GameState::XTurn => {}
+            GameState::ZeroTurn => {}
+            GameState::XWins => {
+                if let Ok(entity) = game_field_q.single_mut() {
+                    commands.entity(entity).despawn();
+                }
+                egui::Window::new("Game summary")
+                    .show(ctx, |ui| {
+                        ui.add(egui::Label::new("X wins!"));
+                        if ui.add(egui::Button::new("Done!")).clicked() {
+                            next_state.set(GameState::BeforeGame);
+                        }
+                    });
+            }
+            GameState::ZeroWins => {
+                if let Ok(entity) = game_field_q.single_mut() {
+                    commands.entity(entity).despawn();
+                }
+                egui::Window::new("Game summary")
+                    .show(ctx, |ui| {
+                        ui.add(egui::Label::new("0 wins!"));
+                        if ui.add(egui::Button::new("Done!")).clicked() {
+                            next_state.set(GameState::BeforeGame);
+                        }
+                    });
+            }
+        }
+    } else {
+        eprintln!("Failed to get Egui context");
+    }
+}
+
+fn reinit_playable_cells(
+    mut playable_cell: Query<(Entity, &mut PlayableCell), With<PlayableCell>>,
+    mut commands: Commands,
+    assets: Res<GameAssets>
+) {
+    for (entity, mut cell) in playable_cell.iter() {
+        commands.entity(entity)
+            .insert(Sprite::from_image(assets.empty_texture.clone()))
+            .insert(PlayableCell {
+                x_index: cell.x_index,
+                y_index: cell.y_index,
+                state: PlayableCellState::Empty
+            });
+    }
+    commands.spawn(GameField::default());
+}
+
+fn on_game_field_created(
+    mut query: Query<&mut GameField, Added<GameField>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if let Ok(_) = query.single_mut() {
+        next_state.set(GameState::XTurn);
+    }
+}
+
 fn load_resources(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
@@ -94,7 +181,6 @@ fn load_resources(
             "ui-pack/PNG/Yellow/Default/bar_square_large_square.png"
         ),
     };
-
     commands.insert_resource(assets);
 }
 
@@ -103,7 +189,6 @@ fn startup(
     game_assets: Res<GameAssets>,
 ) {
     commands.spawn(Camera2d);
-    commands.spawn(GameField::default());
 
     let initial_cell_width: f32 = 24.0;
     let initial_cell_height: f32 = 24.0;
@@ -118,8 +203,8 @@ fn startup(
     for i in 0..3 {
         for j in 0..3 {
             let current_position = Vec3::new(
-                i as f32 * cell_width,
-                j as f32 * cell_height,
+                (i - 1) as f32 * cell_width,
+                (j - 1) as f32 * cell_height,
                 0.0
             );
             commands.spawn((
@@ -141,7 +226,7 @@ fn startup(
                         state: Res<State<GameState>>,
                         game_assets: Res<GameAssets>,
                         mut next_state: ResMut<NextState<GameState>>,
-                        mut cell_q: Query<(&mut PlayableCell)>,
+                        mut cell_q: Query<&mut PlayableCell>,
                         mut game_field_q: Query<&mut GameField>,| {
                 let target_entity = trigger.target.entity();
                 handle_cell_pressed_system(
@@ -170,6 +255,7 @@ fn handle_cell_pressed_system(
     if let Ok((mut playable_cell)) = cell_q.get_mut(target_entity) {
         if let Ok(mut game_field) = game_field_q.single_mut() {
             match *state.get() {
+                GameState::BeforeGame => {}
                 GameState::XTurn => {
                     playable_cell.state = PlayableCellState::X;
                     game_field.put_on_field(
@@ -194,29 +280,6 @@ fn handle_cell_pressed_system(
                 }
                 GameState::ZeroWins => {
                 }
-            }
-        }
-    }
-}
-
-fn system_additional_wins_check_system(
-    state: Res<State<GameState>>,
-    mut game_field_q: Query<Entity, With<GameField>>,
-    mut commands: Commands,
-) {
-    if let Ok(entity) = game_field_q.single_mut() {
-        match *state.get() {
-            GameState::XTurn => {
-            }
-            GameState::ZeroTurn => {
-            }
-            GameState::XWins => {
-                println!("X wins!");
-                commands.entity(entity).despawn();
-            }
-            GameState::ZeroWins => {
-                println!("0 wins!");
-                commands.entity(entity).despawn();
             }
         }
     }
