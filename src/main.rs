@@ -153,11 +153,11 @@ fn ui_example_system(mut contexts: EguiContexts,
 }
 
 fn reinit_playable_cells(
-    mut playable_cell: Query<(Entity, &mut PlayableCell), With<PlayableCell>>,
+    playable_cell: Query<(Entity, &mut PlayableCell), With<PlayableCell>>,
     mut commands: Commands,
     assets: Res<GameAssets>
 ) {
-    for (entity, mut cell) in playable_cell.iter() {
+    for (entity, cell) in playable_cell.iter() {
         commands.entity(entity)
             .insert(Sprite::from_image(assets.empty_texture.clone()))
             .insert(PlayableCell {
@@ -234,12 +234,12 @@ fn startup(
                     ..default()
                 },
             )).observe(|trigger: Trigger<Pointer<Pressed>>,
-                        mut commands: Commands,
+                        commands: Commands,
                         state: Res<State<GameState>>,
                         game_assets: Res<GameAssets>,
-                        mut next_state: ResMut<NextState<GameState>>,
-                        mut cell_q: Query<&mut PlayableCell>,
-                        mut game_field_q: Query<&mut GameField>,| {
+                        next_state: ResMut<NextState<GameState>>,
+                        cell_q: Query<&mut PlayableCell>,
+                        game_field_q: Query<&mut GameField>,| {
                 let target_entity = trigger.target.entity();
                 handle_cell_pressed_system(
                     target_entity,
@@ -257,14 +257,14 @@ fn startup(
 
 fn handle_cell_pressed_system(
     target_entity: Entity,
-    mut cell_q: Query<(&mut PlayableCell)>,
+    mut cell_q: Query<&mut PlayableCell>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut game_field_q: Query<&mut GameField>,
     mut commands: Commands,
     game_assets: Res<GameAssets>,
 ) {
-    if let Ok((mut playable_cell)) = cell_q.get_mut(target_entity) {
+    if let Ok(mut playable_cell) = cell_q.get_mut(target_entity) {
         if let Ok(mut game_field) = game_field_q.single_mut() {
             match *state.get() {
                 GameState::Draw => {
