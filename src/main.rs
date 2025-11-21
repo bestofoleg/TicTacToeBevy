@@ -1,4 +1,4 @@
-use avian2d::prelude::{Collider, PhysicsDebugPlugin, PhysicsPickingPlugin, RigidBody};
+use avian2d::prelude::{Collider, PhysicsPickingPlugin, RigidBody};
 use avian2d::PhysicsPlugins;
 use bevy::app::{App, FixedUpdate, PluginGroup, Startup};
 use bevy::asset::AssetServer;
@@ -12,7 +12,6 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(ImagePlugin::default_nearest()),
             PhysicsPlugins::default().with_length_unit(100.0),
-            PhysicsDebugPlugin::default(),
             PhysicsPickingPlugin,
             EguiPlugin::default(),
         ))
